@@ -1,20 +1,31 @@
-# 1. Собираем фронтенд (Node.js) - тут всё было ок
+# 1. Собираем фронтенд (Node.js)
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
+
+# Отключаем телеметрию и попытки скачать шрифты извне
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_FONT_GOOGLE_SKIP_FETCH=1
+
 COPY frontend/package*.json ./
 RUN npm install
-COPY frontend/ ./
-RUN npm run build
 
-# 2. Собираем бэкенд на Rust (ИСПОЛЬЗУЕМ 1.85 ИЛИ ВЫШЕ)
+COPY frontend/ ./
+
+# ХАК: Если в проекте нет next.config.js, создадим его с отключенными шрифтами.
+# Если есть — подправим, чтобы билд не падал из-за сети.
+RUN if [ ! -f next.config.js ]; then \
+      echo "module.exports = { optimizeFonts: false };" > next.config.js; \
+    fi
+
+# Собираем фронт (без Turbopack, так как он более капризен к сети)
+RUN npx next build
+
+# 2. Собираем бэкенд на Rust
 FROM rust:1.85-slim AS backend-builder
-# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
-# Копируем фронтенд
 COPY --from=frontend-builder /app/frontend/out ./frontend/out
-# Запускаем сборку
 RUN cargo build --release
 
 # 3. Финальный образ
